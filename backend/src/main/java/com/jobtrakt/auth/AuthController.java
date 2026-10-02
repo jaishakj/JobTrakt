@@ -4,6 +4,8 @@ import com.jobtrakt.auth.dto.AuthResponse;
 import com.jobtrakt.auth.dto.LoginRequest;
 import com.jobtrakt.auth.dto.RegisterRequest;
 import com.jobtrakt.auth.dto.UserResponse;
+import com.jobtrakt.auth.dto.ProfileUpdateRequest;
+import com.jobtrakt.auth.dto.PasswordChangeRequest;
 import com.jobtrakt.user.UserPrincipal;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -11,9 +13,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -34,7 +38,23 @@ public class AuthController {
     }
 
     @GetMapping("/me")
+    @SecurityRequirement(name = "bearerAuth")
     public UserResponse me(@AuthenticationPrincipal UserPrincipal currentUser) {
         return new UserResponse(currentUser.id(), currentUser.name(), currentUser.email(), currentUser.createdAt());
+    }
+
+    @PatchMapping("/me")
+    @SecurityRequirement(name = "bearerAuth")
+    public UserResponse updateProfile(@AuthenticationPrincipal UserPrincipal currentUser,
+                                      @Valid @RequestBody ProfileUpdateRequest request) {
+        return authService.updateProfile(currentUser.id(), request);
+    }
+
+    @PatchMapping("/me/password")
+    @SecurityRequirement(name = "bearerAuth")
+    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+    public void changePassword(@AuthenticationPrincipal UserPrincipal currentUser,
+                              @Valid @RequestBody PasswordChangeRequest request) {
+        authService.changePassword(currentUser.id(), request);
     }
 }

@@ -1,6 +1,7 @@
 package com.jobtrakt.auth;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.jobtrakt.job.JobProcessor;
 import com.jobtrakt.user.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,6 +17,7 @@ import org.springframework.http.ResponseEntity;
 class AuthApiIntegrationTest {
     @Autowired private TestRestTemplate http;
     @Autowired private UserRepository users;
+    @Autowired private JobProcessor jobProcessor;
 
     @BeforeEach
     void clearUsers() { users.deleteAll(); }
@@ -86,6 +88,73 @@ class AuthApiIntegrationTest {
         org.junit.jupiter.api.Assertions.assertTrue(invalid.getBody().path("message").asText().contains("email"));
     }
 
+    @Test
+    void applicationCrudIsScopedToAuthenticatedOwnerAndFeedsDashboard() {
+        String ownerToken = registerAndGetToken("owner@example.com");
+        String otherToken = registerAndGetToken("other@example.com");
+        var payload = new ApplicationPayload("Northstar", "Product Designer", "Remote", "FULL_TIME",
+                "INTERVIEW", "2026-09-29", "2026-10-15T16:00:00Z", "https://example.com/jobs/1");
+        ResponseEntity<JsonNode> created = exchange("/api/applications", HttpMethod.POST, payload, ownerToken);
+        org.junit.jupiter.api.Assertions.assertEquals(201, created.getStatusCode().value());
+        long id = created.getBody().path("id").asLong();
+        org.junit.jupiter.api.Assertions.assertEquals("Northstar", created.getBody().path("company").asText());
+
+        ResponseEntity<JsonNode> list = get("/api/applications?status=INTERVIEW&search=north", ownerToken);
+        org.junit.jupiter.api.Assertions.assertEquals(200, list.getStatusCode().value());
+        org.junit.jupiter.api.Assertions.assertEquals(1, list.getBody().path("totalElements").asInt());
+
+        org.junit.jupiter.api.Assertions.assertEquals(404,
+                get("/api/applications/" + id, otherToken).getStatusCode().value());
+        ResponseEntity<JsonNode> dashboard = get("/api/dashboard", ownerToken);
+        org.junit.jupiter.api.Assertions.assertEquals(1, dashboard.getBody().path("totalApplications").asInt());
+        org.junit.jupiter.api.Assertions.assertEquals(1,
+                dashboard.getBody().path("statusCounts").path("INTERVIEW").asInt());
+
+        org.junit.jupiter.api.Assertions.assertEquals(204,
+                exchange("/api/applications/" + id, HttpMethod.DELETE, null, ownerToken).getStatusCode().value());
+        org.junit.jupiter.api.Assertions.assertEquals(0,
+                get("/api/applications", ownerToken).getBody().path("totalElements").asInt());
+    }
+
+    @Test
+    void applicationValidationRejectsMissingRequiredFields() {
+        String token = registerAndGetToken("validate@example.com");
+        ResponseEntity<JsonNode> invalid = exchange("/api/applications", HttpMethod.POST,
+                new ApplicationPayload("", "", "", "FULL_TIME", "APPLIED", "2026-09-29", null, "bad-url"), token);
+        org.junit.jupiter.api.Assertions.assertEquals(400, invalid.getStatusCode().value());
+        org.junit.jupiter.api.Assertions.assertEquals("VALIDATION_ERROR", invalid.getBody().path("error").asText());
+    }
+
+    @Test
+    void dueInterviewJobCreatesAnInAppNotification() {
+        String token = registerAndGetToken("worker@example.com");
+        var payload = new ApplicationPayload("Northstar", "Product Designer", "Remote", "FULL_TIME",
+                "INTERVIEW", java.time.LocalDate.now(java.time.ZoneOffset.UTC).minusDays(2).toString(),
+                java.time.Instant.now().minusSeconds(3600).toString(), null);
+        ResponseEntity<JsonNode> created = exchange("/api/applications", HttpMethod.POST, payload, token);
+        org.junit.jupiter.api.Assertions.assertEquals(201, created.getStatusCode().value());
+
+        org.junit.jupiter.api.Assertions.assertTrue(jobProcessor.processNextDue());
+        ResponseEntity<JsonNode> notifications = get("/api/notifications", token);
+        org.junit.jupiter.api.Assertions.assertEquals(1, notifications.getBody().path("unreadCount").asInt());
+        org.junit.jupiter.api.Assertions.assertEquals("Interview coming up",
+                notifications.getBody().path("notifications").path("content").get(0).path("title").asText());
+    }
+
+    private String registerAndGetToken(String email) {
+        ResponseEntity<JsonNode> response = post("/api/auth/register",
+                new RegisterPayload("Sam", email, "long-password-123"));
+        org.junit.jupiter.api.Assertions.assertEquals(201, response.getStatusCode().value());
+        return response.getBody().path("accessToken").asText();
+    }
+
+    private ResponseEntity<JsonNode> exchange(String path, HttpMethod method, Object body, String token) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(token);
+        if (body != null) headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+        return http.exchange(path, method, new HttpEntity<>(body, headers), JsonNode.class);
+    }
+
     private void register(String email, String password) throws Exception {
         ResponseEntity<JsonNode> response = post("/api/auth/register", new RegisterPayload("Sam", email, password));
         org.junit.jupiter.api.Assertions.assertEquals(201, response.getStatusCode().value());
@@ -103,4 +172,6 @@ class AuthApiIntegrationTest {
 
     private record RegisterPayload(String name, String email, String password) { }
     private record LoginPayload(String email, String password) { }
+    private record ApplicationPayload(String company, String position, String location,
+            String employmentType, String status, String appliedDate, String interviewDate, String jobUrl) { }
 }

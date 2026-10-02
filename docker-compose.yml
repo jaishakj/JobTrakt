@@ -24,6 +24,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       JWT_EXPIRATION_SECONDS: ${JWT_EXPIRATION_SECONDS:-3600}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      JOB_POLL_DELAY_MS: ${JOB_POLL_DELAY_MS:-5000}
     ports:
       - "8080:8080"
     depends_on:

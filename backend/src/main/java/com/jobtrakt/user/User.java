@@ -52,4 +52,6 @@ public class User {
     public String getPasswordHash() { return passwordHash; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
+    public void updateName(String name) { this.name = name.trim(); }
+    public void updatePasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
 }

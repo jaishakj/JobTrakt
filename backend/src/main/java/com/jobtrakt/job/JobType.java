@@ -1,0 +1,2 @@
+package com.jobtrakt.job;
+public enum JobType { INTERVIEW_REMINDER, FOLLOW_UP_REMINDER, APPLICATION_FOLLOW_UP, WEEKLY_REPORT }

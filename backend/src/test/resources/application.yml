@@ -17,3 +17,5 @@ jobtrakt:
     expiration-seconds: 3600
   cors:
     allowed-origin: http://localhost:5173
+
+JOB_POLL_DELAY_MS: 60000

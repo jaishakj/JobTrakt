@@ -3,6 +3,8 @@ package com.jobtrakt.auth;
 import com.jobtrakt.auth.dto.AuthResponse;
 import com.jobtrakt.auth.dto.LoginRequest;
 import com.jobtrakt.auth.dto.RegisterRequest;
+import com.jobtrakt.auth.dto.ProfileUpdateRequest;
+import com.jobtrakt.auth.dto.PasswordChangeRequest;
 import com.jobtrakt.auth.dto.UserResponse;
 import com.jobtrakt.common.exception.DuplicateEmailException;
 import com.jobtrakt.common.exception.InvalidCredentialsException;
@@ -28,6 +30,23 @@ public class AuthService {
         this.users = users;
         this.passwordEncoder = passwordEncoder;
         this.tokens = tokens;
+    }
+
+    @Transactional
+    public UserResponse updateProfile(Long userId, ProfileUpdateRequest request) {
+        User user = users.findById(userId).orElseThrow(() -> new com.jobtrakt.common.exception.ResourceNotFoundException("User"));
+        user.updateName(request.name());
+        return UserResponse.from(user);
+    }
+
+    @Transactional
+    public void changePassword(Long userId, PasswordChangeRequest request) {
+        User user = users.findById(userId).orElseThrow(() -> new com.jobtrakt.common.exception.ResourceNotFoundException("User"));
+        if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
+            throw new InvalidCredentialsException();
+        }
+        ensureBcryptCanEncode(request.newPassword());
+        user.updatePasswordHash(passwordEncoder.encode(request.newPassword()));
     }
 
     @Transactional

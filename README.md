@@ -1,33 +1,43 @@
 # JobTrakt
 
-JobTrakt is a personal job application tracking and automation platform. This repository is a Java/Spring Boot and React/TypeScript monorepo.
+JobTrakt is a personal job search workspace for tracking applications, scheduling follow-ups, and reviewing a weekly search summary. It uses a Spring Boot API backed by PostgreSQL and a React/TypeScript client.
 
-## Project structure
+## Features
 
-```text
-backend/   Spring Boot REST API (Java 21, Maven, PostgreSQL)
-frontend/  React + TypeScript + Vite
-docker-compose.yml
-```
+- JWT registration, login, profile updates, and password changes
+- User-scoped application create, search, filter, update, delete, and timeline
+- PostgreSQL-backed scheduled job queue with row locking, retries, and dead-letter state
+- Interview and follow-up reminders, weekly summaries, and in-app notifications
+- Dashboard metrics from persisted application, notification, and queue data
+- Responsive dashboard, application, automation, notification, and settings screens
+- OpenAPI documentation at `/swagger-ui/index.html`
 
-## Requirements
+## Architecture
 
-- Java 21
-- Maven 3.9+
-- Node.js 20+
-- Docker Engine with the Compose plugin (optional)
-- PostgreSQL 16 (unless using Docker Compose)
+`backend/` is a Java 21 / Spring Boot 3.4 API. Controllers use DTOs and delegate to services, repositories, and JPA entities. Flyway owns the schema; Hibernate uses `ddl-auto=validate`. A scheduled worker claims due PostgreSQL jobs with `FOR UPDATE SKIP LOCKED`, processes one job in a transaction, and applies bounded exponential retry delays.
 
-## Local development
+`frontend/` is a React, TypeScript, and Vite SPA. Its API client attaches the session JWT and clears it on unauthorized responses. The UI uses the existing lightweight history/fetch foundation and repository CSS design system.
 
-Copy `.env.example` to `.env` and set unique local PostgreSQL credentials plus a random `JWT_SECRET` of at least 32 characters. The backend requires `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, and `JWT_SECRET`; it does not contain a fallback signing key. Flyway applies the schema migration at startup, and Hibernate validates its mappings against that schema.
+## Requirements and configuration
 
-Start PostgreSQL and ensure the configured database and user exist. Export `.env` variables into the shell before starting the backend (Spring Boot does not automatically load `.env` files):
+- Java 21 and Maven 3.9+
+- Node.js 20+ and npm
+- PostgreSQL 16, or Docker Compose
+
+Copy `.env.example` to `.env`, set a strong random `JWT_SECRET` (at least 32 characters), and choose local database credentials. Spring Boot does not load `.env` automatically, so export its values when running outside Compose:
 
 ```sh
-set -a
-source .env
-set +a
+cp .env.example .env
+set -a && source .env && set +a
+```
+
+Variables: `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `JWT_SECRET`, `JWT_EXPIRATION_SECONDS`, `FRONTEND_URL`, `VITE_API_URL`, and `JOB_POLL_DELAY_MS`. Compose also uses `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`.
+
+## Run locally
+
+Start PostgreSQL and create the database/user configured above. Then run the API:
+
+```sh
 cd backend
 mvn spring-boot:run
 ```
@@ -36,21 +46,36 @@ In another terminal:
 
 ```sh
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-The frontend runs at <http://localhost:5173> and the API health endpoint is <http://localhost:8080/api/health>. `FRONTEND_URL` controls the allowed local browser origin and `JWT_EXPIRATION_SECONDS` defaults to 3600.
+Open <http://localhost:5173>. The API health route is <http://localhost:8080/api/health>. Flyway applies pending migrations on backend startup.
 
-## Authentication API
+## Docker Compose
 
-- `POST /api/auth/register` — JSON body: `{"name":"Sam","email":"sam@example.com","password":"long-password-123"}`. Creates the account with a BCrypt password hash and returns HTTP 201 with a bearer token and public user details.
-- `POST /api/auth/login` — JSON body: `{"email":"sam@example.com","password":"long-password-123"}`. Returns a bearer token and public user details.
-- `GET /api/auth/me` — requires `Authorization: Bearer <accessToken>` and returns the authenticated account.
+```sh
+cp .env.example .env
+# Set a unique local JWT_SECRET and database password in .env.
+docker compose up --build
+```
 
-Registration requires a non-empty name up to 100 characters, a valid email, and a password between 10 and 72 characters. BCrypt's 72-byte input limit is also enforced. Emails are normalized to lowercase and duplicates return HTTP 409. Validation failures return HTTP 400; bad credentials and missing or invalid tokens return HTTP 401. `/api/health` and `/actuator/health` are public. Other `/api/**` routes require a valid JWT.
+Compose runs PostgreSQL, the Spring API, and the Vite development server. Persistent database data is stored in the `postgres_data` volume.
 
-Example register request:
+## Authentication and API
+
+- `POST /api/auth/register` — `{ "name": "Sam", "email": "sam@example.com", "password": "long-password-123" }`
+- `POST /api/auth/login` — email/password; returns a JWT and public user details
+- `GET /api/auth/me` — current authenticated account
+- `PATCH /api/auth/me` and `PATCH /api/auth/me/password` — account settings
+- `GET|POST /api/applications`, `GET|PUT|DELETE /api/applications/{id}` — application tracking; list supports `status`, `search`, `page`, `size`, and `sort`
+- `GET /api/jobs`, `GET /api/jobs/{id}`, `POST /api/jobs/{id}/retry` — queue visibility and retry
+- `GET /api/notifications`, `PATCH /api/notifications/{id}/read`, `PATCH /api/notifications/read-all`
+- `GET /api/dashboard` — application, upcoming interview, notification, and job queue metrics
+
+Except registration, login, health, and OpenAPI routes, API routes require `Authorization: Bearer <token>`. Data access is scoped to the authenticated user. Registration stores only a BCrypt password hash. API errors use a consistent JSON response and do not return stack traces.
+
+Example account creation:
 
 ```sh
 curl -X POST http://localhost:8080/api/auth/register \
@@ -58,15 +83,40 @@ curl -X POST http://localhost:8080/api/auth/register \
   -d '{"name":"Sam","email":"sam@example.com","password":"long-password-123"}'
 ```
 
-## Docker Compose
+## Automation
+
+An application with an interview date queues an interview reminder. Applied applications queue a follow-up after seven days; an explicit follow-up date takes precedence. Scheduled jobs create in-app notifications only while their source application still matches the dates/status used when queued. A weekly report runs Monday at 09:00 UTC and summarizes the prior seven days. Jobs retry with increasing delays and become `DEAD` after five failed attempts. Users can retry failed/dead jobs from the automation page.
+
+## Database migrations
+
+- `V1__create_users.sql` — accounts
+- `V2__create_job_applications.sql` — user-owned applications
+- `V3__create_jobs.sql` — queue and deduplication keys
+- `V4__create_notifications.sql` — in-app notifications
+- `V5__create_audit_logs.sql` — application change history
+
+All tables use foreign keys, ownership indexes, and UTC-compatible timestamps. Do not use Hibernate schema generation to modify the schema.
+
+## Tests and build
+
+Backend tests use Spring Boot Test, JUnit 5, Mockito, and an H2 PostgreSQL compatibility database. Frontend verification runs TypeScript and Vite production builds.
 
 ```sh
-cp .env.example .env
-docker compose up --build
+cd backend && mvn test package
+cd ../frontend && npm ci && npm run build
 ```
 
-Compose starts PostgreSQL, the API, and the Vite development server. Copy and configure `.env` first; Compose passes database credentials and the JWT secret to the API. The first backend image build downloads Maven dependencies.
+CI runs backend tests/package and frontend install/build on pushes and pull requests. PostgreSQL-specific worker locking should also be exercised against PostgreSQL for release verification.
 
-## Current implementation stage
+## Structure
 
-Phase 1 established the repository layout and application entry points. Phase 2 adds user persistence, the Flyway user migration, registration/login, BCrypt password hashing, JWT authorization, CORS, and centralized API errors. Job applications, background jobs, notifications, analytics, and the authenticated product UI remain for later phases.
+```text
+backend/src/main/java/com/jobtrakt/{application,audit,auth,common,dashboard,job,notification,user}
+backend/src/main/resources/db/migration/
+frontend/src/{api,components,lib,pages}
+.github/workflows/ci.yml
+```
+
+## Deployment notes
+
+Provide the database connection, JWT secret, token lifetime, and allowed frontend origin through the runtime environment. Use TLS, managed secret storage, backups, and a production static frontend server in a deployed environment. The included frontend container is configured for local Vite development.
