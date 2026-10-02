@@ -2,13 +2,16 @@ spring:
   application:
     name: jobtrakt-api
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/jobtrakt}
-    username: ${DATABASE_USERNAME:jobtrakt}
-    password: ${DATABASE_PASSWORD:change-me-locally}
+    url: ${DATABASE_URL}
+    username: ${DATABASE_USERNAME}
+    password: ${DATABASE_PASSWORD}
   jpa:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
 management:
   endpoints:
     web:
@@ -16,3 +19,13 @@ management:
         include: health,info
 server:
   port: 8080
+  error:
+    include-message: never
+    include-stacktrace: never
+
+jobtrakt:
+  jwt:
+    secret: ${JWT_SECRET}
+    expiration-seconds: ${JWT_EXPIRATION_SECONDS:3600}
+  cors:
+    allowed-origin: ${FRONTEND_URL:http://localhost:5173}
