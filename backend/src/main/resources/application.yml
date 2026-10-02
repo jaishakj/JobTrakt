@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: jobtrakt-api
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/jobtrakt}
+    username: ${DATABASE_USERNAME:jobtrakt}
+    password: ${DATABASE_PASSWORD:change-me-locally}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+server:
+  port: 8080
